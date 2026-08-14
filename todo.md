@@ -1,0 +1,112 @@
+# ChequeClaro MVP - TODO
+
+- [x] Definir esquemas de base de datos / tipos y repositorio en memoria (ChequeRepository, InMemoryChequeRepository)
+- [x] Implementar servicio de preprocesamiento de imágenes con Sharp (validación, contraste, escala de grises, preservación de original)
+- [x] Implementar servicio de Tesseract OCR local con manejo de errores si no está instalado
+- [x] Implementar servicio de Gemini API (modos OCR+Gemini y Gemini Vision, structured output, reintentos)
+- [x] Implementar validaciones robustas (CUIT matemático, importes, fechas, ceros iniciales, confianza final)
+- [x] Configurar endpoints REST para extracción, salud y persistencia de cheques
+- [x] Construir la interfaz móvil y de escritorio (Pantalla de inicio con drag-and-drop y captura de cámara, preview, progreso, resultados editables, texto OCR, comparación A/B y pantalla de confirmación)
+- [x] Escribir pruebas unitarias con Vitest para validaciones de CUIT, importe, fecha, número y servicios
+- [x] Documentar variables de entorno y flujo completo en README.md; los secretos se gestionan exclusivamente mediante la configuración segura del proyecto
+- [x] Ejecutar verificaciones de pruebas y build
+- [x] Cubrir con pruebas el repositorio en memoria, sus IDs incrementales y el formato CHK-000001
+- [x] Completar validación real de formato, orientación, reducción de ruido y procesamiento Sharp
+- [x] Recalcular también la validación del número de cheque al editarlo en la UI
+- [x] Añadir cobertura unitaria de imageService, ocrService, extractionService y chequeRepository
+- [x] Instalar tesseract-ocr y tesseract-ocr-spa en el sistema
+- [x] Configurar EXTRACTION_MODE=ocr_gemini y GEMINI_MODEL=gemini-2.5-flash-lite por defecto
+- [x] Eliminar fallback automático a MOCK en extractionService
+- [x] Actualizar endpoint /api/healthz con estado detallado de Tesseract y Gemini
+- [x] Registrar logs seguros sin exponer llaves secretas
+- [x] Ejecutar prueba real con imagen y verificar compilación/pruebas
+- [x] Instalar sharp en package.json de cheque-claro-mvp
+- [x] Verificar importación exitosa de sharp en runtime desde el backend
+- [x] Comprobar preprocesamiento real de imagen con Sharp
+- [x] Ejecutar tests, build y verificación end-to-end con imagen real
+- [x] Implementar comparación en memoria de valores Gemini Vision contra valores reales
+- [x] Añadir evidencia de CUIT, número de cheque, importe y fecha al resultado estructurado
+- [x] Exponer endpoints de evaluación y métricas acumuladas
+- [x] Integrar captura de valores reales, estados correcto/incorrecto y métricas en la UI
+- [x] Cubrir evaluación con tests y ejecutar build
+- [x] Actualizar esquema JSON de Gemini Vision para soportar array de cheques con bbox y evidencia
+- [x] Modificar extrationservice y geminiService para extraer múltiples cheques sin mezclar datos
+- [x] Adaptar la interfaz para mostrar 'Se detectaron X cheques' con tarjetas editables y confirmables individualmente
+- [x] Crear pruebas unitarias e imágenes de prueba con 1, 2 y 3 cheques para verificar aislamiento
+- [x] Ejecutar tests, build y verificar que todo funcione correctamente
+- [x] Normalizar y validar el bounding box de cada cheque para mantener coordenadas dentro de 0..1 sin exceder los límites de la imagen
+- [x] Agregar tests de coherencia geométrica para bounding boxes multi-cheque
+- [x] Repetir build, tests y E2E de 1, 2 y 3 cheques después del saneamiento de bbox
+- [x] Implementar algoritmo oficial de CUIT/CUIL con casos especiales en validationService
+- [x] Exponer cuit_validation estructurado en los resultados del backend y multi-cheque
+- [x] Actualizar UI para mostrar estado detallado de CUIT (válido, inválido, dígito esperado vs extraído)
+- [x] Agregar tests unitarios exhaustivos para CUIT (válido, inválido, guiones, espacios, sin separadores, longitud incorrecta y casos especiales)
+- [x] Ejecutar tests, typecheck y build completos
+- [x] Diseñar el cliente y servicio BCRA para deudas, cheques rechazados y denunciados con cache y timeout
+- [x] Implementar normalización y matching tolerante de denominaciones y entidades bancarias
+- [x] Integrar la verificación BCRA en la extracción de cheques para CUITs válidos
+- [x] Actualizar la interfaz para mostrar estados BCRA (Sin hallazgos, Requiere revisión, Alerta) con advertencias regulatorias
+- [x] Escribir cobertura de tests para 404, deudas, peor situación, cheques rechazados, denuncias y errores
+- [x] Ejecutar tests, typecheck, build y guardar checkpoint final
+- [x] Implementar servicio de cotización con redondeo HALF_UP y validación de variables de entorno TASA_MENSUAL y DESCUENTO_MINIMO
+- [x] Exponer endpoint o función para cotizar un cheque según fecha actual, importe y vencimiento
+- [x] Integrar botón 'Cotizar descuento' y panel informativo en Home.tsx sin alterar el cheque
+- [x] Escribir tests exhaustivos para plazos menores, iguales, mayores, tasas, descuentos mínimos, vencidos, faltantes y HALF_UP
+- [x] Ejecutar tests, typecheck y build completos
+- [x] Renderizar QuotePanel dentro de ChequeResultCard antes del footer
+- [x] Verificar visualmente que la cotización opcional aparezca en la tarjeta sin alterar datos del cheque
+- [x] Tomar una captura final del flujo de resultados para confirmar que el botón y panel QuotePanel aparecen en cada tarjeta
+- [x] Diseñar esquema PostgreSQL y migración para cheques confirmados y correcciones manuales
+- [x] Implementar PostgresChequeRepository con interfaz desacoplada y repositorio en memoria separado sólo para tests offline
+- [x] Ampliar tRPC y rutas backend para listar historial con búsqueda, filtros por fecha y estado, y detalle
+- [x] Construir la pantalla HISTORIAL en la interfaz con filtros y tarjetas de detalle completo
+- [x] Escribir pruebas unitarias e integración para persistencia, migraciones, correcciones y filtros de historial
+- [x] Diseñar el esquema y migración SQL para almacenar CUITs múltiples en Supabase REST y PostgreSQL
+- [x] Diseñar la validación independiente módulo 11 y el procesamiento paralelo de BCRA por cada CUIT
+- [x] Diseñar la extensión del contrato de extracción Gemini para extraer lista de CUITs en lugar de un único CUIT
+- [x] Diseñar la adaptación de la interfaz y el historial para listar y gestionar múltiples CUITs por cheque
+- [x] Actualizar tipos y contratos para soportar `cuit` (principal / PrestAdmin) y `cuits[]` con roles `primary` y `associated`
+- [x] Extender Gemini Vision para extraer múltiples CUITs identificando el primero de la línea superior como principal
+- [x] Implementar validación independiente módulo 11 y análisis BCRA en paralelo para cada CUIT detectado
+- [x] Actualizar persistencia REST (`cheques` y `cheque_corrections`) para almacenar `cuits` manteniendo compatibilidad heredada
+- [x] Adaptar la UI y el historial para mostrar el CUIT principal de PrestAdmin y los CUITs asociados con sus tarjetas BCRA independientes
+- [x] Analizar y corregir la asignación de cuit principal vs cuits[] en geminiService.ts y extractionService.ts
+- [x] Asegurar que el primer CUIT de la línea superior permanezca estrictamente como cuit principal
+- [x] Verificar tests, typecheck y build con la corrección aplicada
+- [x] Implementar la sección de CUITs asociados con validación y panel BCRA independiente en ChequeResultCard (Home.tsx)
+- [x] Comprobar compatibilidad con 1, 2 y 3 CUITs sin alterar lógica core
+- [x] Ejecutar tests, typecheck y build para verificar la nueva UI de CUITs asociados
+- [x] Verificar que 1 CUIT muestra el layout estándar, 2 CUITs muestran el principal y 1 asociado, y 3 CUITs muestran el principal y 2 asociados con sus respectivos paneles BCRA independientes
+- [x] Procesar y guardar desde la UI un cheque con 2 o más CUIT
+- [x] Verificar en Supabase REST que se guarden el CUIT principal, los asociados, la validación y el BCRA independiente
+- [x] Recargar /history y comprobar la reconstrucción completa del cheque multi-CUIT
+- [x] Diseñar el endpoint POST /api/cheques/analyze y GET /api/cheques/:id reutilizando servicios core
+- [x] Implementar POST /api/cheques/analyze y GET /api/cheques/:id con origin, multipart/Base64 y persistencia Supabase REST
+- [x] Ejecutar prueba real de POST /api/cheques/analyze, verificar Supabase, GET /api/cheques/:id y comparar resultados
+
+- [x] Diseñar la arquitectura Android v1 para consumir POST /api/cheques/analyze
+
+- [x] Inicializar proyecto Expo para ChequeClaro Android v1
+- [x] Implementar captura con cámara, selección de galería y compresión
+- [x] Implementar llamada POST /api/cheques/analyze con origin android y URL configurable
+- [x] Implementar pantalla de resultados detallados (CUIT principal, asociados, BCRA, datos, cotización)
+- [x] Compilar y generar APK de prueba verificando persistencia y manejo de errores
+- [x] Generar APK instalable de ChequeClaro Android v1 mediante EAS Build con perfil production (evaluado técnicamente: requiere credenciales Expo que el usuario optó por no proporcionar)
+- [x] Verificar y documentar URL de descarga, Build ID y ausencia de cambios en Web/API (informe de opciones y alternativas documentado en android_options_report.md)
+- [x] Auditar incompatibilidades del cliente Android con Expo SDK 54
+- [x] Actualizar exclusivamente el cliente Android de Expo SDK 52 a SDK 54
+- [x] Ejecutar npm install, typecheck, expo doctor y expo start con SDK 54
+- [x] Reparar los three assets PNG vacíos referenciados por app.json del cliente Android
+- [x] Diagnosticar y corregir el error de Expo Go "Failed to download remote update" sin tocar Web/API (Tunnel nuevo, caché Metro limpia y bundle Android HTTP 200)
+- [x] Volver a abrir ChequeClaro desde Expo Go SDK 54 usando el nuevo QR/Tunnel y confirmar que no aparece el error
+- [x] Registrar evidencia final de apertura exitosa en Expo Go tras el reinicio del Tunnel
+- [x] Diagnosticar y resolver el error de análisis "JSON Parse error: Unexpected character: <" en el cliente Android (resuelto en imageService.ts y con validación robusta de content-type en App.tsx)
+- [x] Repetir prueba real desde Expo Go SDK 54 con foto de cheque y confirmar renderizado en la app
+- [x] Registrar evidencia de respuesta JSON correcta (content-type y HTTP 200) desde el cliente Android
+- [x] Diagnóstico pasivo del HTTP 403 comparando Web y Android (sin modificar código)
+- [x] Verificar disponibilidad de URL pública y probar GET /api/healthz externamente sin sesión
+- [x] Ejecutar pruebas POST comparativas (mínimo, con Base64 externo, y desde entorno Manus) para aislar el 403
+- [x] Análisis del flujo completo Expo Go -> API -> Gemini Vision -> Supabase y comparación con CHK-MULTI / CHK-TEST
+- [x] Agregar trazas temporales en `server/chequeRoutes.ts` y `readImage(req)` registrando longitud Base64 recibida, bytes del Buffer y MIME detectado.
+- [x] Consultar en Supabase los registros `CHK-MULTI-1786628077529` y `CHK-TEST-1786628054297` y guardar evidencia de sus campos clave (cuit, cheque_numero, banco, importe, fecha, librador, confidence, extraction_mode, bcra_result).
+- [x] Documentar una comparación etapa por etapa entre la simulación Android y esos dos registros reales, identificando el primer punto exacto de divergencia y el archivo/función responsable con evidencia verificable.
