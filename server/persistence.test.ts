@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { PostgresChequeRepository } from "./dbPostgres";
 import { InMemoryChequeRepository } from "./services/chequeRepository";
 
 describe("Cheque Persistence & Repository Tests", () => {
@@ -55,32 +54,5 @@ describe("Cheque Persistence & Repository Tests", () => {
 
     const emptyResults = await repo.listCheques({ search: "Inexistente" });
     expect(emptyResults.length).toBe(0);
-  });
-
-  it("returns a persistence error instead of falling back to memory when no DB URL is configured", async () => {
-    const originalEnv = process.env.SUPABASE_DATABASE_URL;
-    delete process.env.SUPABASE_DATABASE_URL;
-
-    try {
-      const pgRepo = new PostgresChequeRepository();
-      await expect(pgRepo.saveCheque({
-        imageUrl: "",
-        cuit: "20-99999999-9",
-        cuitValidation: "VALID",
-        chequeNumero: "123456",
-        banco: "Macro",
-        importe: 500000,
-        moneda: "ARS",
-        fechaPago: "2026-12-31",
-        librador: "Test Offline",
-        ocrText: "",
-        confidence: { cuit: 1, cheque_numero: 1, banco: 1, importe: 1, fecha_pago: 1, librador: 1 },
-        extractionMode: "gemini_vision",
-        editedFields: [],
-        status: "confirmado"
-      })).rejects.toMatchObject({ name: "PersistenceError", code: "PERSISTENCE_ERROR" });
-    } finally {
-      if (originalEnv) process.env.SUPABASE_DATABASE_URL = originalEnv;
-    }
   });
 });

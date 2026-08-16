@@ -1,8 +1,29 @@
-import { describe, it, expect, vi } from 'vitest';
-import { chequeRepository, PersistenceError } from './services/chequeRepository';
-import { SupabaseRestChequeRepository } from './dbSupabaseRest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { chequeRepository } from './services/chequeRepository';
+import { SupabaseRestChequeRepository, PersistenceError } from './dbSupabaseRest';
 
 describe('ChequeClaro Unified API & Persistence Comprehensive', () => {
+  beforeEach(() => {
+    vi.stubEnv('SUPABASE_URL', 'http://localhost:3000');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-key');
+    global.fetch = vi.fn().mockImplementation(async (url, options) => {
+      if (options?.method === 'GET') {
+        return { ok: true, json: async () => ([{ id: 'CHK-1234', timestamp: Date.now(), cuit: '20-12345678-6', cuits: [
+          { cuit: '20-12345678-6', role: 'primary' },
+          { cuit: '27-87654321-4', role: 'associated' }
+        ], origin: 'whatsapp' }]) };
+      }
+      return { ok: true, json: async () => ([{ id: 'CHK-1234', timestamp: Date.now(), cuit: '20-12345678-6', cuits: [
+        { cuit: '20-12345678-6', role: 'primary' },
+        { cuit: '27-87654321-4', role: 'associated' }
+      ], origin: 'whatsapp' }]) };
+    }) as any;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
   it('should persist a cheque with multiple cuits and retrieve it by id', async () => {
     const mockCheque = {
       imageUrl: '',
@@ -43,9 +64,9 @@ describe('ChequeClaro Unified API & Persistence Comprehensive', () => {
 
   it('should throw PersistenceError and NOT fallback to memory when Supabase fails', async () => {
     const repo = new SupabaseRestChequeRepository();
-    // Forzar endpoint inválido que cause fallo de fetch (TypeError de red)
     vi.stubEnv('SUPABASE_URL', 'http://localhost:9999');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'invalid-key');
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
 
     const badCheque = {
       imageUrl: '',

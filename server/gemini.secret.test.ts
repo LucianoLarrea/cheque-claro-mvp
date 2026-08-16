@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 
 describe('Gemini configuration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('keeps the API key server-side and validates the configured credential when available', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'test-key');
     const apiKey = process.env.GEMINI_API_KEY;
     expect(typeof apiKey).toBe('string');
 

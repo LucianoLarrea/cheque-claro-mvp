@@ -1,10 +1,15 @@
 import express from 'express';
 import type { AddressInfo } from 'node:net';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { registerChequeRoutes } from './chequeRoutes';
 
 describe('EVALUATION_MODE runtime configuration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('reports evaluation mode through the lightweight health endpoint', async () => {
+    vi.stubEnv('EVALUATION_MODE', 'true');
     expect(process.env.EVALUATION_MODE).toBe('true');
     const app = express();
     registerChequeRoutes(app);

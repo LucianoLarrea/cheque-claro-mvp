@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { extractionService } from './services/extractionService';
 import { chequeRepository } from './services/chequeRepository';
-import { PersistenceError } from './dbPostgres';
+import { PersistenceError } from './dbSupabaseRest';
 import { normalizeFecha, normalizeImporte, normalizeNumeroCheque, validateCuit, formatCuit } from './services/validationService';
 import { evaluationService, EvaluationGroundTruth } from './services/evaluationService';
 import { calculateQuote, getQuoteConfig } from './services/quoteService';
@@ -207,8 +207,13 @@ export function registerChequeRoutes(app: Express) {
   });
 
   app.post('/api/cheques/analyze', async (req: Request, res: Response) => {
+    const requestId = Math.random().toString(36).slice(2, 8);
+    const analyzeStartedAt = performance.now();
+    console.log(`[PERF][${requestId}] analyze START`);
     try {
+      const readImageStartedAt = performance.now();
       const { buffer, filename, mimeType } = await readImage(req);
+      console.log(`[PERF][${requestId}] readImage=${Math.round(performance.now() - readImageStartedAt)}ms`);
       if (!isImageValid(filename, mimeType, buffer.length)) {
         return res.status(400).json({ error: 'La imagen no parece ser válida. Usá JPG, PNG o WEBP de hasta 10 MB.' });
       }
@@ -222,10 +227,13 @@ export function registerChequeRoutes(app: Express) {
       const origin = validOrigins.includes(rawOrigin) ? rawOrigin : 'web';
 
       // 1. Ejecutar extracción completa mediante pipeline Gemini / OCR
-      const extraction = await extractionService.extract(buffer, filename, undefined, mimeType);
+      const extractionStartedAt = performance.now();
+      const extraction = await extractionService.extract(buffer, filename, undefined, mimeType, requestId);
+      console.log(`[PERF][${requestId}] extraction=${Math.round(performance.now() - extractionStartedAt)}ms`);
 
       // 2. Calcular cotización opcional si hay importe y fecha
       let quoteResult = null;
+      const quoteStartedAt = performance.now();
       try {
         if (extraction.data.importe !== null && extraction.data.fecha_pago) {
           quoteResult = calculateQuote({
@@ -237,6 +245,7 @@ export function registerChequeRoutes(app: Express) {
       } catch (qErr) {
         console.warn('[API] analyze quote calculation warning:', qErr);
       }
+      console.log(`[PERF][${requestId}] quote=${Math.round(performance.now() - quoteStartedAt)}ms`);
 
       // 3. Persistir en Supabase REST sin fallback a memoria
       const d = extraction.data;
@@ -246,6 +255,7 @@ export function registerChequeRoutes(app: Express) {
       const impValidation = d.validation.importe;
       const fechaValidation = d.validation.fecha_pago;
 
+      const supabaseStartedAt = performance.now();
       const record = await chequeRepository.saveCheque({
         imageUrl: '',
         cuit: formatCuit(primaryCuit),
@@ -265,15 +275,21 @@ export function registerChequeRoutes(app: Express) {
         quote: quoteResult,
         origin: origin as 'web' | 'android' | 'whatsapp' | 'batch',
       });
+      console.log(`[PERF][${requestId}] supabase=${Math.round(performance.now() - supabaseStartedAt)}ms`);
 
-      return res.status(201).json({
+      const responseStartedAt = performance.now();
+      const responseBody = {
         success: true,
         origin,
         extraction,
         quote: quoteResult,
         record,
-      });
+      };
+      console.log(`[PERF][${requestId}] response=${Math.round(performance.now() - responseStartedAt)}ms`);
+      console.log(`[PERF][${requestId}] TOTAL=${Math.round(performance.now() - analyzeStartedAt)}ms`);
+      return res.status(201).json(responseBody);
     } catch (error: any) {
+      console.error(`[PERF][${requestId}] analyze ERROR total=${Math.round(performance.now() - analyzeStartedAt)}ms`);
       console.error('[API] analyze error:', error);
       const message = error?.message || 'No pudimos procesar ni persistir el cheque.';
       if (error instanceof PersistenceError || error?.code === 'PERSISTENCE_ERROR' || message.includes('Supabase REST')) {
@@ -288,7 +304,21 @@ export function registerChequeRoutes(app: Express) {
 
   app.patch('/api/cheques/:id', async (req: Request, res: Response) => {
     try {
-      const updated = await chequeRepository.updateCheque(req.params.id, req.body || {});
+      const body = req.body || {};
+      const allowedKeys = ['cuit', 'chequeNumero', 'banco', 'librador', 'importe', 'fechaPago', 'moneda'];
+      const updates: any = {};
+      
+      for (const key of allowedKeys) {
+        if (key in body) {
+          updates[key] = body[key];
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'Ningún campo válido provisto para actualizar.' });
+      }
+
+      const updated = await chequeRepository.updateCheque(req.params.id, updates);
       if (!updated) return res.status(404).json({ error: 'Cheque no encontrado para actualizar.' });
       return res.json(updated);
     } catch (error: any) {
