@@ -1,4 +1,7 @@
 import { ChequeRecord, ChequeRepository } from './services/chequeRepository';
+import { determineInvalidation } from './services/invalidationService';
+import { buildBcraRiskLevel, compareBcraTitular } from './services/bcraService';
+import { calculateQuote } from './services/quoteService';
 
 export class PersistenceError extends Error {
   readonly code = 'PERSISTENCE_ERROR';
@@ -46,13 +49,29 @@ export class SupabaseRestChequeRepository implements ChequeRepository {
 
     const timestamp = Date.now();
     const id = generateChequeId();
-    const bcraPayload = typeof (data as any).bcra === 'object' && (data as any).bcra !== null ? { ...(data as any).bcra } : {};
+    const bcraData = typeof (data as any).bcra === 'object' && (data as any).bcra !== null ? { ...(data as any).bcra } : {};
     if ((data as any).cuits) {
-      bcraPayload.cuits_data = (data as any).cuits;
+      bcraData.cuits_data = (data as any).cuits;
     }
     if ((data as any).origin) {
-      bcraPayload.origin = (data as any).origin;
+      bcraData.origin = (data as any).origin;
     }
+
+    const bcraHasContent = Object.keys(bcraData).length > 0;
+    const bcraTotalFailure = bcraHasContent
+      && bcraData.estados
+      && bcraData.estados.deudas === 'error'
+      && bcraData.estados.cheques_rechazados === 'error'
+      && bcraData.estados.entidad === 'error';
+    const bcraPayload = {
+      state: !bcraHasContent ? 'NOT_STARTED' : (bcraTotalFailure ? 'FAILED' : 'COMPLETED'),
+      snapshot: {
+        cuit: data.cuit || null,
+        cheque_numero: data.chequeNumero || null,
+        banco: data.banco || null,
+      },
+      data: bcraData,
+    };
 
     const payload: any = {
       id,
@@ -159,7 +178,64 @@ export class SupabaseRestChequeRepository implements ChequeRepository {
       }
 
       const updated = { ...current, ...updates };
-      const patchPayload = {
+
+      const invalidation = determineInvalidation(current as unknown as Record<string, any>, updates as unknown as Record<string, any>);
+
+      // Defensa de snapshot (sección 6 MASTERPLAN): comparamos contra el registro YA fusionado
+      // (updated), no solo contra los campos presentes en `updates`. Esto cubre tanto el caso
+      // "se está editando cuit/chequeNumero/banco ahora" como el caso "ya había un mismatch
+      // preexistente entre bcra.snapshot y el valor vigente del cheque", aunque este PATCH
+      // puntual no toque esos campos.
+      const currentSnapshot = (current as any).bcra?.snapshot;
+      const snapshotMismatch = currentSnapshot
+        && ((updated.cuit ?? null) !== (currentSnapshot.cuit ?? null)
+          || (updated.chequeNumero ?? null) !== (currentSnapshot.cheque_numero ?? null)
+          || (updated.banco ?? null) !== (currentSnapshot.banco ?? null));
+      if (snapshotMismatch) {
+        invalidation.requiresBcraFetch = true;
+      }
+
+      let bcraResultToPersist: any = (current as any).bcra;
+      if (invalidation.requiresBcraFetch) {
+        bcraResultToPersist = {
+          state: 'STALE',
+          snapshot: {
+            cuit: updated.cuit ?? null,
+            cheque_numero: updated.chequeNumero ?? null,
+            banco: updated.banco ?? null,
+          },
+          data: null,
+        };
+      } else if (invalidation.requiresBcraReinterpretation && bcraResultToPersist && bcraResultToPersist.data) {
+        const existingData = bcraResultToPersist.data;
+        const newTitularCoincide = compareBcraTitular(existingData.titular_bcra, updated.librador);
+        const newNivel = buildBcraRiskLevel({
+          titular_coincide: newTitularCoincide,
+          situacion_crediticia: existingData.situacion_crediticia,
+          cheques_rechazados: existingData.cheques_rechazados,
+          cheque_denunciado: existingData.cheque_denunciado,
+          entidad_bcra: existingData.entidad_bcra,
+          estados: existingData.estados,
+        });
+        bcraResultToPersist = {
+          ...bcraResultToPersist,
+          data: {
+            ...existingData,
+            titular_coincide: newTitularCoincide,
+            nivel: newNivel,
+          },
+        };
+      }
+
+      let quoteResultToPersist: any = (current as any).quote;
+      if (invalidation.requiresQuoteRecalc) {
+        quoteResultToPersist = calculateQuote({
+          amount: updated.importe,
+          dueDate: updated.fechaPago,
+        });
+      }
+
+      const patchPayload: any = {
         cuit: updated.cuit,
         cuit_validation: updated.cuitValidation,
         cheque_numero: updated.chequeNumero,
@@ -168,6 +244,8 @@ export class SupabaseRestChequeRepository implements ChequeRepository {
         fecha_pago: updated.fechaPago,
         librador: updated.librador,
         edited_fields: updated.editedFields || [],
+        bcra_result: bcraResultToPersist,
+        quote_result: quoteResultToPersist,
       };
 
       const response = await fetch(`${config.endpoint}/rest/v1/cheques?id=eq.${encodeURIComponent(id)}`, {
@@ -244,9 +322,10 @@ export class SupabaseRestChequeRepository implements ChequeRepository {
 
   private mapRowToRecord(row: any): ChequeRecord {
     const bcra = typeof row.bcra_result === 'string' ? JSON.parse(row.bcra_result) : row.bcra_result;
-    const cuitsFromBcra = bcra && Array.isArray(bcra.cuits_data) ? bcra.cuits_data : null;
+    const bcraData = bcra && bcra.data ? bcra.data : null;
+    const cuitsFromBcra = bcraData && Array.isArray(bcraData.cuits_data) ? bcraData.cuits_data : null;
     const cuits = cuitsFromBcra || (Array.isArray(row.cuits) ? row.cuits : (row.cuit ? [{ cuit: row.cuit, role: 'primary' }] : []));
-    const origin = bcra && bcra.origin ? bcra.origin : (row.origin || 'web');
+    const origin = bcraData && bcraData.origin ? bcraData.origin : (row.origin || 'web');
 
     return {
       id: row.id,
