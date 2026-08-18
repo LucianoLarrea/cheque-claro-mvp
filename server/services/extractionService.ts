@@ -130,7 +130,9 @@ export function normalizeBoundingBox(raw: Partial<ChequeBoundingBox> | null | un
   return { bbox: { x, y, width, height }, corrected };
 }
 
-async function verifyWithBcra<T extends ValidatedChequeData>(data: T): Promise<T> {
+// Exportada para Fase 1C: el job de background de chequeRoutes.ts la reutiliza
+// tal cual (mismos CUITs, misma lógica multi-CUIT) para no duplicar la consulta a BCRA.
+export async function verifyWithBcra<T extends ValidatedChequeData>(data: T): Promise<T> {
   const cuitsList = Array.isArray(data.cuits) && data.cuits.length > 0
     ? data.cuits
     : [{ cuit: data.cuit, role: 'primary' as const }];
@@ -193,14 +195,30 @@ function validateVisionAndNormalize(raw: ExtractedChequeData, fallbackId: number
   };
 }
 
+export interface ExtractOptions {
+  // Fase 1C: cuando es true, NO se consulta BCRA de forma síncrona dentro de la extracción.
+  // Los cheques quedan con bcra = buildSkippedBcraVerification() (estado "no consultado"),
+  // y el llamador es responsable de disparar la verificación BCRA en background.
+  skipBcra?: boolean;
+}
+
 export class ExtractionService {
-  async extract(inputBuffer: Buffer, filename: string, requestedMode?: ExtractionMode, mimeType?: string): Promise<ExtractionResult> {
+  async extract(inputBuffer: Buffer, filename: string, requestedMode?: ExtractionMode, mimeType?: string, requestId?: string, options?: ExtractOptions): Promise<ExtractionResult> {
+    const skipBcra = Boolean(options?.skipBcra);
+    const extractionStartedAt = performance.now();
+    const logPerf = (stage: string, startedAt: number) => {
+      if (requestId) {
+        console.log(`[PERF][${requestId}] ${stage}=${Math.round(performance.now() - startedAt)}ms`);
+      }
+    };
     const mode = requestedMode || modeFromEnv();
     const uploadDir = path.join(os.tmpdir(), 'cheque-claro');
     const comparisonEnabled = String(process.env.COMPARISON_MODE).toLowerCase() === 'true';
+    const sharpStartedAt = performance.now();
     const processed = mode === 'mock' && !comparisonEnabled
       ? null
       : await preprocessImage(inputBuffer, filename, uploadDir, mimeType);
+    logPerf('sharp', sharpStartedAt);
 
     let data: ValidatedChequeData;
     let cheques: ValidatedVisionChequeData[] = [];
@@ -218,16 +236,28 @@ export class ExtractionService {
       ocrText = ocr.text;
       ocrDurationMs = ocr.durationMs;
       if (!ocrText.trim()) throw new Error('No se detectó suficiente información. Intentá con una foto más clara.');
+      const geminiStartedAt = performance.now();
       const gemini = await geminiService.extractFromOcrText(ocrText);
+      logPerf('gemini', geminiStartedAt);
+      const normalizationStartedAt = performance.now();
       const normalized = validateVisionAndNormalize(gemini.data, 1);
-      cheques = [await verifyWithBcra(normalized)];
+      logPerf('normalization', normalizationStartedAt);
+      const bcraStartedAt = performance.now();
+      cheques = skipBcra ? [normalized] : [await verifyWithBcra(normalized)];
+      logPerf('bcra', bcraStartedAt);
       data = cheques[0];
       geminiDurationMs = gemini.durationMs;
     } else {
-      const gemini = await geminiService.extractFromVision(processed!.processedPath);
+      const geminiStartedAt = performance.now();
+      const gemini = await geminiService.extractFromVision(processed!.processedPath, requestId);
+      logPerf('gemini', geminiStartedAt);
+      const normalizationStartedAt = performance.now();
       const normalizedCheques = gemini.data.map((item, index) => validateVisionAndNormalize(item, index + 1));
+      logPerf('normalization', normalizationStartedAt);
       if (normalizedCheques.length === 0) throw new Error('Gemini no detectó ningún cheque independiente en la imagen.');
-      cheques = await Promise.all(normalizedCheques.map((item) => verifyWithBcra(item)));
+      const bcraStartedAt = performance.now();
+      cheques = skipBcra ? normalizedCheques : await Promise.all(normalizedCheques.map((item) => verifyWithBcra(item)));
+      logPerf('bcra', bcraStartedAt);
       data = cheques[0];
       geminiDurationMs = gemini.durationMs;
     }
@@ -256,12 +286,15 @@ export class ExtractionService {
 
     // Limpieza temporal: se mantienen sólo durante la extracción.
     if (processed) {
+      const cleanupStartedAt = performance.now();
       await Promise.allSettled([
         fs.promises.unlink(processed.originalPath),
         fs.promises.unlink(processed.processedPath),
       ]);
+      logPerf('cleanup', cleanupStartedAt);
     }
 
+    logPerf('extraction-total', extractionStartedAt);
     return {
       mode,
       data,

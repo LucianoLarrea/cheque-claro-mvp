@@ -1,4 +1,4 @@
-import { ChequeRecord, ChequeRepository } from './services/chequeRepository';
+import { ChequeRecord, ChequeRepository, ApplyBcraResultInput } from './services/chequeRepository';
 import { determineInvalidation } from './services/invalidationService';
 import { buildBcraRiskLevel, compareBcraTitular } from './services/bcraService';
 import { calculateQuote } from './services/quoteService';
@@ -266,6 +266,59 @@ export class SupabaseRestChequeRepository implements ChequeRepository {
     } catch (error) {
       console.error('[Supabase REST] Error updating cheque:', error instanceof Error ? error.message : 'unknown error');
       throw new PersistenceError('actualizar el cheque en Supabase REST', error);
+    }
+  }
+
+  async applyBcraResult(id: string, input: ApplyBcraResultInput): Promise<boolean> {
+    const config = getSupabaseConfig();
+    if (!config) {
+      throw new PersistenceError('aplicar el resultado BCRA: SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no están configuradas');
+    }
+
+    const current = await this.getCheque(id);
+    if (!current) return false;
+
+    // Defensa de carrera (sección 9 MASTERPLAN): comparamos contra el estado VIGENTE del
+    // cheque en este instante, no contra bcra.snapshot (que puede haber sido pisado por un
+    // PATCH de usuario intermedio que ya lo puso en STALE). Si no coincide, se descarta.
+    const vigente = {
+      cuit: current.cuit ?? null,
+      cheque_numero: current.chequeNumero ?? null,
+      banco: current.banco ?? null,
+    };
+    const mismatch = vigente.cuit !== (input.snapshot.cuit ?? null)
+      || vigente.cheque_numero !== (input.snapshot.cheque_numero ?? null)
+      || vigente.banco !== (input.snapshot.banco ?? null);
+    if (mismatch) {
+      console.warn(`[BCRA background] snapshot mismatch para ${id}, se descarta resultado (state=${input.state})`);
+      return false;
+    }
+
+    const bcraPayload: any = {
+      state: input.state,
+      snapshot: input.snapshot,
+      data: input.state === 'COMPLETED' ? input.data : null,
+    };
+    if (input.state === 'FAILED') {
+      bcraPayload.error = input.error;
+    }
+
+    try {
+      const response = await fetch(`${config.endpoint}/rest/v1/cheques?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: this.getHeaders(config.key),
+        body: JSON.stringify({ bcra_result: bcraPayload }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Supabase REST error HTTP ${response.status}: ${text}`);
+      }
+      return true;
+    } catch (error) {
+      console.error('[Supabase REST] Error applying BCRA result:', error instanceof Error ? error.message : 'unknown error');
+      if (error instanceof PersistenceError) throw error;
+      throw new PersistenceError('aplicar el resultado BCRA en Supabase REST', error);
     }
   }
 

@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
-import { extractionService } from './services/extractionService';
+import { extractionService, verifyWithBcra, ValidatedChequeData } from './services/extractionService';
 import { chequeRepository } from './services/chequeRepository';
+import type { BcraSnapshot } from './services/chequeRepository';
 import { PersistenceError } from './dbSupabaseRest';
 import { normalizeFecha, normalizeImporte, normalizeNumeroCheque, validateCuit, formatCuit } from './services/validationService';
 import { evaluationService, EvaluationGroundTruth } from './services/evaluationService';
@@ -68,6 +69,35 @@ async function readImage(req: Request): Promise<{ buffer: Buffer; filename: stri
 
   console.log('[API Trace] readImage - Error: No se recibió una imagen válida.');
   throw new Error('No se recibió una imagen válida.');
+}
+
+// Fase 1C: consulta BCRA desacoplada del request /analyze. Se dispara sin await luego de
+// responder al cliente. NUNCA usa updateCheque()/determineInvalidation() (sección 8
+// MASTERPLAN) — persiste directamente viá applyBcraResult(), que aplica la defensa de
+// snapshot en cada escritura (sección 9 MASTERPLAN).
+async function runBcraBackgroundJob(chequeId: string, extractedData: ValidatedChequeData, origin: string, requestId: string): Promise<void> {
+  const snapshot: BcraSnapshot = {
+    cuit: extractedData.cuit || null,
+    cheque_numero: extractedData.cheque_numero || null,
+    banco: extractedData.banco || null,
+  };
+
+  const appliedRunning = await chequeRepository.applyBcraResult(chequeId, { state: 'RUNNING', snapshot });
+  if (!appliedRunning) {
+    console.warn(`[BCRA background][${requestId}] snapshot ya no válido antes de arrancar; se aborta el job para ${chequeId}`);
+    return;
+  }
+
+  try {
+    const verified = await verifyWithBcra(extractedData);
+    const bcraData = { ...verified.bcra, cuits_data: verified.cuits || [], origin };
+    await chequeRepository.applyBcraResult(chequeId, { state: 'COMPLETED', snapshot, data: bcraData });
+  } catch (error) {
+    console.error(`[BCRA background][${requestId}] error consultando BCRA para ${chequeId}:`, error);
+    const message = error instanceof Error ? error.message : String(error);
+    const errorCode = /abort|timeout/i.test(message) ? 'timeout' : 'network_error';
+    await chequeRepository.applyBcraResult(chequeId, { state: 'FAILED', snapshot, error: errorCode });
+  }
 }
 
 export function registerChequeRoutes(app: Express) {
@@ -226,9 +256,10 @@ export function registerChequeRoutes(app: Express) {
       const validOrigins = ['web', 'android', 'whatsapp', 'batch'];
       const origin = validOrigins.includes(rawOrigin) ? rawOrigin : 'web';
 
-      // 1. Ejecutar extracción completa mediante pipeline Gemini / OCR
+      // 1. Ejecutar extracción completa mediante pipeline Gemini / OCR.
+      // Fase 1C: BCRA se salta acá (skipBcra) y se resuelve en background luego de responder.
       const extractionStartedAt = performance.now();
-      const extraction = await extractionService.extract(buffer, filename, undefined, mimeType, requestId);
+      const extraction = await extractionService.extract(buffer, filename, undefined, mimeType, requestId, { skipBcra: true });
       console.log(`[PERF][${requestId}] extraction=${Math.round(performance.now() - extractionStartedAt)}ms`);
 
       // 2. Calcular cotización opcional si hay importe y fecha
@@ -287,7 +318,15 @@ export function registerChequeRoutes(app: Express) {
       };
       console.log(`[PERF][${requestId}] response=${Math.round(performance.now() - responseStartedAt)}ms`);
       console.log(`[PERF][${requestId}] TOTAL=${Math.round(performance.now() - analyzeStartedAt)}ms`);
-      return res.status(201).json(responseBody);
+      res.status(201).json(responseBody);
+
+      // Fase 1C: consulta BCRA en background, ya con la respuesta HTTP enviada.
+      // .catch() explícito además del try/catch interno de runBcraBackgroundJob: nunca debe
+      // quedar una unhandled promise rejection colgando en el proceso Node persistente.
+      void runBcraBackgroundJob(record.id, d, origin, requestId).catch((error) => {
+        console.error(`[BCRA background][${requestId}] job error no capturado:`, error);
+      });
+      return;
     } catch (error: any) {
       console.error(`[PERF][${requestId}] analyze ERROR total=${Math.round(performance.now() - analyzeStartedAt)}ms`);
       console.error('[API] analyze error:', error);
